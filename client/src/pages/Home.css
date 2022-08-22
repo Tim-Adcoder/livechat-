@@ -1,0 +1,13 @@
+
+.home_bg {
+    background-image: url(../assets/home_background.jpg);
+    height: 92vh;
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    overflow-x: hidden;
+}
+
+.home-message-icon {
+    margin-left: inline-block;
+}
