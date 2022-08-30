@@ -1,98 +1,81 @@
 const express = require('express');
-const app = express();
-const userRoutes = require('./routes/userRoutes')
-const User = require('./models/User');
-const Message = require('./models/Message')
-const rooms = ['general', 'tech', 'finance', 'crypto'];
-const cors = require('cors');
+const {ApolloServer} = require('apollo-server-express');
+const path = require('path');
+const {authMiddleware} = require('./utils/auth')
 
-app.use(express.urlencoded({extended: true}));
-app.use(express.json());
-app.use(cors());
-
-app.use('/users', userRoutes)
-require('./connection')
-
-const server = require('http').createServer(app);
-const PORT = 5001;
-const io = require('socket.io')(server, {
-  cors: {
-    origin: 'http://localhost:3000',
-    methods: ['GET', 'POST']
-  }
-})
+const {PubSub} = require('graphql-subscriptions')
+const { createServer } = require('http')
+const {
+  ApolloServerPluginDrainHttpServer,
+  ApolloServerPluginLandingPageLocalDefault,
+} = require("apollo-server-core")
+const { makeExecutableSchema } =require('@graphql-tools/schema')
+const { WebSocketServer } = require('ws');
+const { useServer } = require('graphql-ws/lib/use/ws')
 
 
-async function getLastMessagesFromRoom(room){
-  let roomMessages = await Message.aggregate([
-    {$match: {to: room}},
-    {$group: {_id: '$date', messagesByDate: {$push: '$$ROOT'}}}
-  ])
-  return roomMessages;
+const {typeDefs, resolvers} = require('./schemas')
+const db = require('./config/connection')
+
+const PORT = process.env.PORT || 3001
+const app = express()
+
+app.use(express.urlencoded({extended: true}))
+app.use(express.json())
+
+
+if(process.env.NODE_ENV == 'production'){
+	app.use(express.static(path.join(__dirname, '../client/build')))
 }
 
-function sortRoomMessagesByDate(messages){
-  return messages.sort(function(a, b){
-    let date1 = a._id.split('/');
-    let date2 = b._id.split('/');
+app.get('/*',(req, res) => {
+	res.sendFile(path.join(__dirname, '../client/build/index.html'))
+})
 
-    date1 = date1[2] + date1[0] + date1[1]
-    date2 =  date2[2] + date2[0] + date2[1];
+const httpServer = createServer(app)
 
-    return date1 < date2 ? -1 : 1
-  })
+const wsServer = new WebSocketServer({
+	server: httpServer,
+	path: '/subscriptions'
+})
+
+const schema = makeExecutableSchema({ typeDefs, resolvers });
+
+const server = new ApolloServer({
+	schema,
+	csrfPrevention: true,
+	cache: "bounded",
+	plugins: [
+		ApolloServerPluginLandingPageLocalDefault({ embed: true }),
+		{
+			async serverWillStart() {
+			  return {
+				async drainServer() {
+				  await serverCleanup.dispose();
+				},
+			  };
+			},
+		  }
+	],
+	context: authMiddleware
+})
+
+
+
+const serverCleanup = useServer({schema}, wsServer)
+
+
+
+
+const startApolloServer = async (typeDefs, resolvers) =>{
+	await server.start()
+	server.applyMiddleware({app})
+	db.once('open', ()=>{
+		httpServer.listen(PORT, () =>{
+			console.log(`API server running on port ${PORT}`)
+			console.log(`Graphql server running at http://localhost:${PORT}${server.graphqlPath}`)
+		})
+	})
 }
 
-// socket connection
-
-io.on('connection', (socket)=> {
-
-  socket.on('new-user', async ()=> {
-    const members = await User.find();
-    io.emit('new-user', members)
-  })
-
-  socket.on('join-room', async(newRoom, previousRoom)=> {
-    socket.join(newRoom);
-    socket.leave(previousRoom);
-    let roomMessages = await getLastMessagesFromRoom(newRoom);
-    roomMessages = sortRoomMessagesByDate(roomMessages);
-    socket.emit('room-messages', roomMessages)
-  })
-
-  socket.on('message-room', async(room, content, sender, time, date) => {
-    const newMessage = await Message.create({content, from: sender, time, date, to: room});
-    let roomMessages = await getLastMessagesFromRoom(room);
-    roomMessages = sortRoomMessagesByDate(roomMessages);
-    // sending message to room
-    io.to(room).emit('room-messages', roomMessages);
-    socket.broadcast.emit('notifications', room)
-  })
-
-  app.delete('/logout', async(req, res)=> {
-    try {
-      const {_id, newMessages} = req.body;
-      const user = await User.findById(_id);
-      user.status = "offline";
-      user.newMessages = newMessages;
-      await user.save();
-      const members = await User.find();
-      socket.broadcast.emit('new-user', members);
-      res.status(200).send();
-    } catch (e) {
-      console.log(e);
-      res.status(400).send()
-    }
-  })
-
-})
-
-
-app.get('/rooms', (req, res)=> {
-  res.json(rooms)
-})
-
-
-server.listen(PORT, ()=> {
-  console.log('listening to port', PORT)
-})
+startApolloServer(typeDefs, resolvers)
