@@ -1,8 +1,35 @@
 # livechat-
 
- Getting Started with Create React App
+## deplyed link and github link
+https://live-chat-adcoder.herokuapp.com/
+https://github.com/Tim-Adcoder/livechat-.git
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+
+
+## User Story
+
+```md
+AS AN friend
+I WANT to talk to my friend privately
+SO THAT have a private conversation 
+```
+## Built With
+
+- HTML
+- CSS
+- Bootstrap
+- React
+- JavaScript
+- Node.js
+  - express
+  - mongoose
+  - bcrypt
+  - jsonwebtoken
+  - apollo-server-express
+  - graphql
+
+
+
 
 ## Available Scripts
 
